@@ -1,0 +1,41 @@
+{
+  "name": "watcher",
+  "version": "1.0.0",
+  "main": "server.ts",
+  "scripts": {
+    "start": "nodemon src/app.ts",
+    "pm2-staging": "pm2 start npm --name staging-dc -- run staging-server",
+    "build": "tsc",
+    "watch": "ts-node-dev --respawn --transpile-only src/server.ts  config:env/dev.env",
+    "debug": "ts-node-dev --respawn --inspect-brk --transpile-only src/server.ts --config config:env/dev.env",
+    "dev-build": "node dist/app.js  config:env/dev.env",
+    "dev": "ts-node src/app.ts  config:env/dev.env",
+    "prod": "ts-node src/app.ts  config:env/dc-production.env",
+    "prod-js": "tsc & node dist/app.js  config:env/dc-production.env",
+    "prod-ec2": "node dist/app.js  config:/var/growlytics/appi.env",
+    "staging": "ts-node src/app.ts config:env/dc-staging.env"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "amqplib": "^0.10.5",
+    "axios": "^1.7.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-async-errors": "^3.1.1",
+    "http-status-codes": "^2.3.0",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.2",
+    "moment": "^2.30.1",
+    "mongoose": "^8.5.2",
+    "nanoid": "^3.1.19",
+    "redis": "^4.7.0",
+    "ts-node-dev": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21"
+  }
+}
