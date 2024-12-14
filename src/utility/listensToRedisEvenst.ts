@@ -48,10 +48,8 @@ export const subscribeToNotifications = () => {
             query: { _id: urlId },
           });
 
-          console.log(url_data);
-
           //@ts-ignore
-          await addJobService(url_data[0]);
+          await addJobService({ url_data: url_data[0] });
         }
         if (key.includes("shadow")) {
           const originalKey = key.replace("shadow-", "");
