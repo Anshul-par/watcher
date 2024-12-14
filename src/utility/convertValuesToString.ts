@@ -1,3 +1,5 @@
+import { Types } from "mongoose";
+
 type AnyObject = { [key: string]: any };
 
 /**
@@ -21,6 +23,11 @@ export function convertValuesToStrings(obj: AnyObject): AnyObject {
           ? JSON.stringify(item)
           : String(item)
       );
+    } else if (value instanceof Date) {
+      result[key] = value.toISOString();
+    } else if (typeof value === "object" && value !== null) {
+    } else if (value instanceof Types.ObjectId) {
+      result[key] = value.toString();
     } else if (typeof value === "object" && value !== null) {
       // Recursively process nested objects
       result[key] = convertValuesToStrings(value);

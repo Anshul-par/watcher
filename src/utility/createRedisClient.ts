@@ -9,10 +9,10 @@ export const createRedisClient = async () => {
   while (retries < MAX_RETRIES) {
     try {
       const client_1 = createClient({
-        url: process.env.REDIS_URL,
+        url: "redis://localhost:6380",
       }) as RedisClientType;
       const client_2 = createClient({
-        url: process.env.REDIS_URL,
+        url: "redis://localhost:6380",
       }) as RedisClientType;
 
       // If Pub-sub is used, any place in the code-base, r -> publisher and r_d -> subscriber
@@ -24,6 +24,7 @@ export const createRedisClient = async () => {
 
       console.log("--Redis Connected--");
 
+      // listen
       return { r, r_d };
     } catch (error) {
       console.log(`Error while creating Redis client: ${error}`);

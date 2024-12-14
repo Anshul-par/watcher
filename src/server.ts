@@ -12,6 +12,7 @@ import { StatusCodes } from "http-status-codes";
 import { errorMiddleware } from "./middlewares/errorMiddleware";
 import { rootRouter } from "./routes";
 import { consumerForDeadLettersQueue } from "./broker";
+import { subscribeToNotifications } from "./utility/listensToRedisEvenst";
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
@@ -60,4 +61,5 @@ app.all("*", (req, _) => {
 // CENTRAL ERROR MIDDLEWARE
 app.use(errorMiddleware);
 
-startServer(app, port).then(() => consumerForDeadLettersQueue());
+startServer(app, port).then(() => subscribeToNotifications());
+// .then(() => consumerForDeadLettersQueue());

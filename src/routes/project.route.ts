@@ -1,8 +1,12 @@
 import express from "express";
-import { createProjectController } from "../controllers/project.controller";
+import {
+  createProjectController,
+  getProjectController,
+} from "../controllers/project.controller";
 
 const projectRouter = express.Router();
 
 projectRouter.post("/", createProjectController);
+projectRouter.get("/", getProjectController);
 
 export { projectRouter };

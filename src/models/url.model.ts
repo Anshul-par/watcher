@@ -22,7 +22,8 @@ const urlSchema = new Schema(
     },
     cronSchedule: {
       type: Number,
-      default: 3600,
+      default: 1800,
+      min: 1800,
     },
     timeout: {
       type: Number,
@@ -34,7 +35,7 @@ const urlSchema = new Schema(
     },
     project: {
       type: Schema.Types.ObjectId,
-      ref: "project",
+      ref: "Project",
       required: true,
     },
   },
