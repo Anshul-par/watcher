@@ -17,7 +17,7 @@ interface UrlHealthCheckTask {
 }
 
 // Define the health check result interface
-interface UrlHealthCheckResult {
+export interface IUrlHealthCheckResult {
   taskId: string;
   url_id: string;
   url: string;
@@ -35,7 +35,7 @@ interface UrlHealthCheckResult {
 
 export async function performUrlHealthCheck(
   task: UrlHealthCheckTask
-): Promise<UrlHealthCheckResult> {
+): Promise<IUrlHealthCheckResult> {
   const startTime = Date.now();
 
   try {
@@ -46,8 +46,7 @@ export async function performUrlHealthCheck(
       headers: task.headers || {},
       data: task.body,
       timeout: task.timeout * 1000, // convert to milliseconds
-      // Add additional axios configurations as needed
-      validateStatus: () => true, // Allow all status codes
+      validateStatus: () => true,
     };
 
     // Perform the request
@@ -57,7 +56,7 @@ export async function performUrlHealthCheck(
     const responseTime = Date.now() - startTime;
 
     // Prepare health check result
-    const result: UrlHealthCheckResult = {
+    const result: IUrlHealthCheckResult = {
       taskId: task._id.toString(),
       url_id: task._id.toString(),
       url: task.url,

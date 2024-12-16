@@ -27,7 +27,7 @@ export const getUrlController = async (req: Request, res: Response) => {
     populate: ["project"],
   });
 
-  res
+  return res
     .status(StatusCodes.OK)
     .json({ message: "URL fetched successfully", success: true, data });
 };

@@ -7,6 +7,11 @@ const urlSchema = new Schema(
       required: true,
       trim: true,
     },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     urlWithIpPort: {
       type: String,
       required: true,
