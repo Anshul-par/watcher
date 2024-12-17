@@ -22,8 +22,6 @@ export const startServer = async (app: Application, port: number) => {
       query: {},
     });
 
-    await addJobService({ url_data: url });
-
     app.listen(port, () => {
       console.log(`server started at port: ${port}\n`);
     });

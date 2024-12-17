@@ -1,4 +1,3 @@
-import { workerPool } from "../server";
 import { findUrl } from "../services/url.service";
 import { redisClientDuplicate } from "./startServer";
 
@@ -39,8 +38,6 @@ export const subscribeToNotifications = () => {
               ...urlData[0],
               method: urlData[0].method || "GET", // Default to "GET" if method is not defined
             };
-
-            await workerPool.addTask(urlDataToBeProcessed);
           }
         }
       } catch (error) {

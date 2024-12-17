@@ -11,7 +11,7 @@ import { APIError } from "./errors/apiError";
 import { StatusCodes } from "http-status-codes";
 import { errorMiddleware } from "./middlewares/errorMiddleware";
 import { rootRouter } from "./routes";
-import { consumerForDeadLettersQueue } from "./broker";
+import { consumerForDeadLettersQueue, start } from "./broker";
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
@@ -60,4 +60,4 @@ app.all("*", (req, _) => {
 // CENTRAL ERROR MIDDLEWARE
 app.use(errorMiddleware);
 
-startServer(app, port).then(() => consumerForDeadLettersQueue());
+startServer(app, port).then(async () => await start());
