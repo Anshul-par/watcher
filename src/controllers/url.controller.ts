@@ -8,11 +8,19 @@ import {
 import { IURL } from "../types/model.types";
 import { Request } from "../types/request.types";
 import { Response } from "express";
+import { addJobService } from "../services/jobs.service";
 
 export const createUrlController = async (req: Request, res: Response) => {
   const payload: IURL = req.body;
 
-  await createUrl(payload);
+  const url = await createUrl(payload);
+
+  await addJobService({
+    // @ts-ignore
+    url_data: {
+      ...url,
+    },
+  });
 
   res
     .status(StatusCodes.CREATED)

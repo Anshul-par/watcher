@@ -44,7 +44,7 @@ export async function performUrlHealthCheck(
       method: task.method,
       url: task.url,
       headers: task.headers || {},
-      data: task.body,
+      data: task.body || {},
       timeout: task.timeout * 1000, // convert to milliseconds
       validateStatus: () => true,
     };
