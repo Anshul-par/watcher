@@ -12,7 +12,7 @@ export let redisClientDuplicate: RedisClientType;
 export const startServer = async (app: Application, port: number) => {
   try {
     await connectToDB();
-    // await connectToRabbitMQ();
+    await connectToRabbitMQ();
 
     const { r, r_d } = await createRedisClient();
     redisClient = r;
