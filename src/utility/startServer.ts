@@ -18,9 +18,12 @@ export const startServer = async (app: Application, port: number) => {
     redisClient = r;
     redisClientDuplicate = r_d;
 
-    const url = await findUrl({
-      query: {},
-    });
+    // const urls = await findUrl({ query: { _id: "676276328b680b419820ec0a" } });
+
+    // for (const url of urls) {
+    //   //@ts-ignore
+    //   await addJobService({ url_data: url });
+    // }
 
     app.listen(port, () => {
       console.log(`server started at port: ${port}\n`);

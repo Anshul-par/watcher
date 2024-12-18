@@ -1,46 +1,38 @@
-import { findUrl } from "../services/url.service";
+import { publishToDeleteQueue, publishToJobLetterQueue } from "../broker";
 import { redisClientDuplicate } from "./startServer";
 
+/**
+ * Subscribes to Redis notifications for expired keys and processes them based on their type.
+ * Handles two types of keys:
+ * - "delete-*": Represents keys that require saving data to the database before being deleted.
+ * - "shadow-*": Represents keys for scheduling and managing periodic health checks.
+ */
 export const subscribeToNotifications = () => {
+  // Ensure the duplicate Redis client is initialized and connected.
   if (!redisClientDuplicate) {
     console.error("Redis client not initialized or is not connected.");
     return;
   }
 
   console.log("--Subscribed to Notifications--");
+
+  // Subscribe to Redis key expiration events.
   redisClientDuplicate.subscribe(
     "__keyevent@0__:expired",
     async (key: string) => {
       try {
+        console.log(`Processing expired key: ${key}`);
+        // Handle "delete-*" keys: Save data to the database and cleanup.
+        if (key.includes("delete")) {
+          publishToDeleteQueue(Buffer.from(key));
+        }
+
+        // Handle "shadow-*" keys: Perform health checks and reschedule.
         if (key.includes("shadow")) {
-          const originalKey = key.replace("shadow-", "");
-          if (originalKey.includes("cron")) {
-            // `cron-${url_data.project}-${url_data._id}`
-            const [projectId, urlId] = originalKey
-              .replace("cron-", "")
-              .split("-");
-
-            const urlData = await findUrl({
-              query: { project: projectId, _id: urlId },
-            });
-
-            if (urlData.length === 0) {
-              console.error(
-                `URL not found for project: ${projectId} and urlId: ${urlId}`
-              );
-              return;
-            }
-
-            console.log(
-              `Processing job for project: ${projectId} and urlId: ${urlId}`
-            );
-            const urlDataToBeProcessed = {
-              ...urlData[0],
-              method: urlData[0].method || "GET", // Default to "GET" if method is not defined
-            };
-          }
+          publishToJobLetterQueue(Buffer.from(key));
         }
       } catch (error) {
+        // Log any errors encountered during processing.
         console.error(`Error processing expired key: ${key}`, error);
       }
     }
