@@ -24,6 +24,8 @@ services:
       - RABBITMQ_URL=amqps://vgvxrvyi:JF_OtuJ7DcmvwSJ2b6bRmKcfxFYMlRA1@puffin.rmq2.cloudamqp.com/vgvxrvyi
       - JWT_SECRET=OKOIjkdmfekr83495rijfdkfls'OFRKEOFKml,drbhfjgeryi
       - REDIS_URL=redis://redis/
+      - SLACK_TOKEN=xoxb-8184291399011-8170433298871-y9YeNSNN7mt9dlKR1spyE4be
+      - SLACK_CHANNEL_ID=C0857NJJCG6
     depends_on:
       redis:
         condition: service_healthy
