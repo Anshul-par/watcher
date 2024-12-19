@@ -11,8 +11,8 @@ import { APIError } from "./errors/apiError";
 import { StatusCodes } from "http-status-codes";
 import { errorMiddleware } from "./middlewares/errorMiddleware";
 import { rootRouter } from "./routes";
-import { consumerForDeadLettersQueue } from "./broker";
 import { subscribeToNotifications } from "./utility/listensToRedisEvenst";
+import { TimezoneService } from "./services/timezone.service";
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
@@ -21,14 +21,7 @@ const port = Number(process.env.PORT) || 3001;
 app.use((req, _, next) => {
   const info = req.method + " " + req.url;
   console.log(
-    new Date().toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "numeric",
-      second: "numeric",
-    }),
+    TimezoneService.formatDate(TimezoneService.getCurrentTimestamp()),
     ":: API HIT ------->",
     info,
     "\n|\nv\n|\nv\n"
@@ -62,4 +55,3 @@ app.all("*", (req, _) => {
 app.use(errorMiddleware);
 
 startServer(app, port).then(() => subscribeToNotifications());
-// .then(() => consumerForDeadLettersQueue());

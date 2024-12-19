@@ -11,6 +11,10 @@ import { convertValuesToStrings } from "../utility/convertValuesToString";
 import { performUrlHealthCheck } from "../utility/performHealthCheck";
 import { findUrl } from "../services/url.service";
 import { URLModel } from "../models/url.model";
+import { UserModel } from "../models/user.model";
+import { TimezoneService } from "../services/timezone.service";
+import { createHealth } from "../services/health.service";
+import { addJobService } from "../services/jobs.service";
 
 let connectionToRabbitMQ: amqplib.Connection = null;
 
@@ -110,7 +114,7 @@ export const publishToDeadLetterQueue = async (data: Buffer) => {
 
 export const publishToDeleteQueue = async (data: Buffer) => {
   try {
-    deleteChannel.sendToQueue(DEAD_LETTER_QUEUE, data);
+    deleteChannel.sendToQueue(DELETE_QUEUE, data);
   } catch (error) {
     console.log(`Error while publishing to Location queue ${error}`);
   }
@@ -123,12 +127,23 @@ export const consumerForDeadLettersQueue = () => {
     try {
       if (message !== null) {
         const data = message.content;
-        const urlId = data.toString();
+        let urlId = data.toString();
+
+        if (urlId.includes("delete-cron-")) {
+          urlId = urlId.replace("delete-cron-", "").split("-")[1]; // Extract URL ID.
+        }
+
+        console.log(`Processing message from dead letter queue:`, urlId);
 
         const urlDetails = await URLModel.findById(urlId).populate({
           path: "project",
-          populate: { path: "owner" },
         });
+
+        //@ts-ignore
+        const owner = await UserModel.findById(urlDetails.project.owner);
+
+        //@ts-ignore
+        urlDetails.project.owner = owner;
 
         await sendMessageToSlack(urlDetails);
 
@@ -152,6 +167,8 @@ export const consumerForDeleteQueue = () => {
         const data = message.content;
         const parsedData = data.toString();
 
+        console.log(`Processing message from delete queue:`, parsedData);
+
         const originalKey = parsedData.replace("delete-", ""); // Remove "delete-" prefix to get the original key.
         const [_, urlId] = originalKey.replace("cron-", "").split("-"); // Extract URL ID.
 
@@ -163,12 +180,19 @@ export const consumerForDeleteQueue = () => {
           `${originalKey}`
         );
 
+        let parsedJson;
+        try {
+          parsedJson = JSON.parse(latestResponse);
+        } catch (error) {
+          parsedJson = [];
+        }
+
         // Save the key data to the database.
         //@ts-ignore
         await createHealth({
           ...dataTobeSaved,
-          latestResponse: JSON.parse(latestResponse), // Parse the latest response as JSON.
-          //@ts-ignore
+          unix: TimezoneService.getCurrentTimestamp(),
+          latestResponse: parsedJson, // Parse the latest response as JSON.
           url: urlId,
         });
 
@@ -209,7 +233,7 @@ export const consumerForDeleteQueue = () => {
 
         deleteChannel.ack(message);
 
-        console.log(`Received message from dead letter queue:`, parsedData);
+        console.log(`Received message from delete queue:`, parsedData);
       }
     } catch (error) {
       console.log(`Error while consuming from Delete_Queue  ${error}`);
@@ -238,14 +262,12 @@ export const consumerForJobQueue = () => {
 
           // Find the corresponding URL data in the database.
           const urlData = await findUrl({
-            query: { project: projectId, _id: urlId },
+            query: { _id: urlId },
           });
 
           // Handle case where URL data is not found.
           if (urlData.length === 0) {
-            console.error(
-              `URL not found for project: ${projectId} and URL ID: ${urlId}`
-            );
+            console.error(`URL not found  URL ID: ${urlId}`);
             return;
           }
 
@@ -266,7 +288,9 @@ export const consumerForJobQueue = () => {
           const response = await redisClient.hGetAll(originalKey);
 
           // Record the inspection time.
-          const inspection_time = new Date().toISOString();
+          const inspection_time = TimezoneService.formatDate(
+            TimezoneService.getCurrentTimestamp()
+          );
           health["inspection_time"] = inspection_time;
 
           // Increment the number of cron runs.

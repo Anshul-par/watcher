@@ -10,6 +10,7 @@ import { Request } from "../types/request.types";
 import { Response } from "express";
 import { findUrl } from "../services/url.service";
 import { redisClient } from "../utility/startServer";
+import { TimezoneService } from "../services/timezone.service";
 
 export const createHealthController = async (req: Request, res: Response) => {
   const payload: IHealth = req.body;
@@ -55,20 +56,16 @@ export const getLiveHealthController = async (req: Request, res: Response) => {
 
 export const getHealthController = async (req: Request, res: Response) => {
   const q: Partial<IHealth> = req.query;
+
+  console.log(q);
   const query: any = { ...q };
 
   if (q.createdAt) {
-    const selectedDate = new Date(q.createdAt.toString());
-
-    // Start of the day
-    const startOfDay = new Date(selectedDate);
-    startOfDay.setUTCHours(0, 0, 0, 0);
-
-    // End of the day
-    const endOfDay = new Date(selectedDate);
-    endOfDay.setUTCHours(23, 59, 59, 999);
-
-    query.createdAt = { $gte: startOfDay, $lte: endOfDay };
+    const { endOfDay, startOfDay } = TimezoneService.getDayRange(
+      Number(q.createdAt)
+    );
+    query.unix = { $gte: startOfDay, $lte: endOfDay };
+    delete query.createdAt;
   }
 
   const data = await findHealth({

@@ -23,6 +23,10 @@ const healthSchema = new Schema(
       type: Schema.Types.Mixed,
       required: true,
     },
+    unix: {
+      type: Number,
+      required: true,
+    },
   },
   { timestamps: true }
 );

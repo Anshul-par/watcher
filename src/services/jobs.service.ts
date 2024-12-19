@@ -3,6 +3,7 @@ import { APIError } from "../errors/apiError";
 import { IURL } from "../types/model.types";
 import { convertValuesToStrings } from "../utility/convertValuesToString";
 import { redisClient } from "../utility/startServer";
+import { TimezoneService } from "./timezone.service";
 
 export const addJobService = async ({ url_data }: { url_data: IURL }) => {
   if (!url_data.project || !url_data._id) {
@@ -36,7 +37,7 @@ export const addJobService = async ({ url_data }: { url_data: IURL }) => {
       EX: url_data.cronSchedule,
     });
     await redisClient.set(deleteKey, "1", {
-      EX: 24 * 60 * 60,
+      EX: TimezoneService.getSecondsRemainingToday(),
     });
   } catch (error) {
     console.log("Error while adding job", error);

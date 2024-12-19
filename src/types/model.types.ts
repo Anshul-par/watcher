@@ -27,6 +27,7 @@ export interface IHealth {
   numberOfRetries: number;
   numberOfTimeouts: number;
   latestResponse: any;
+  unix: number;
   createdAt?: Date;
   updatedAt?: Date;
 }

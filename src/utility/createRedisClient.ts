@@ -9,10 +9,10 @@ export const createRedisClient = async () => {
   while (retries < MAX_RETRIES) {
     try {
       const client_1 = createClient({
-        url: "redis://localhost:6380",
+        url: process.env.REDIS_URL,
       }) as RedisClientType;
       const client_2 = createClient({
-        url: "redis://localhost:6380",
+        url: process.env.REDIS_URL,
       }) as RedisClientType;
 
       // If Pub-sub is used, any place in the code-base, r -> publisher and r_d -> subscriber

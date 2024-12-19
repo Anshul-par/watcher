@@ -20,7 +20,7 @@ services:
       - "5672:5672"
       - "15672:15672"
 
-  vpn:
+  watcher:
     build:
       dockerfile: Dockerfile.dev
       context: .
