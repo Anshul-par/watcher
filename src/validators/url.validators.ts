@@ -8,7 +8,9 @@ export const validate_url = Joi.object({
   body: Joi.object().default({}),
   cronSchedule: Joi.number().integer().min(1).default(3600),
   timeout: Joi.number().integer().min(1).default(15),
-  method: Joi.string().valid("GET", "POST", "PATCH", "DELETE").required(),
+  method: Joi.string()
+    .valid("GET", "POST", "PUT", "PATCH", "DELETE")
+    .required(),
   project: Joi.custom(Joi_ObjectId).optional(),
 });
 
