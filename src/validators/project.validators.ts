@@ -20,7 +20,7 @@ export const validate_update_project = {
   body: joi
     .object({
       name: joi.string().optional().trim(),
-      description: joi.string().optional().trim(),
+      description: joi.string().optional().allow("").trim(),
       owner: joi.custom(Joi_ObjectId).optional(),
     })
     .min(1)
