@@ -2,6 +2,7 @@ import Joi from "joi";
 import { Joi_ObjectId } from "./custom";
 
 export const validate_url = Joi.object({
+  name: Joi.string().required().trim(),
   url: Joi.string().uri().required().trim(),
   urlWithIpPort: Joi.string().uri().required().trim(),
   headers: Joi.object().default({}),

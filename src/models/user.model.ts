@@ -13,6 +13,10 @@ const userSchema = new Schema(
       unique: true,
       trim: true,
     },
+    title: {
+      type: String,
+      default: "",
+    },
   },
   { timestamps: true }
 );
