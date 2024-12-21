@@ -5,6 +5,7 @@ import { projectRouter } from "./project.route";
 import { utilityRouter } from "./utility";
 import { healthRouter } from "./health";
 import { userRouter } from "./user";
+import { authRouter } from "./auth.route";
 
 const rootRouter = express.Router();
 
@@ -13,6 +14,7 @@ rootRouter.use("/user", userRouter);
 rootRouter.use("/project", projectRouter);
 rootRouter.use("/utility", utilityRouter);
 rootRouter.use("/health", healthRouter);
+rootRouter.use("/auth", authRouter);
 
 rootRouter.get("/", async (_, res) => {
   res

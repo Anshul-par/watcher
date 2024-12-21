@@ -4,12 +4,12 @@ services:
     image: redis
     container_name: redis
     init: true
-    volumes:
-      - ./r-dump:/r-dump
-      - ./redis-backup.sh:/redis-backup.sh
+    # volumes:
+    #   - ./r-dump:/r-dump
+    #   - ./redis-backup.sh:/redis-backup.sh
     ports:
       - "6381:6379"
-    entrypoint: ["/bin/bash", "-c", "/redis-backup.sh"]
+    # entrypoint: ["/bin/bash", "-c", "/redis-backup.sh"]
 
   watcher:
     build:
@@ -23,8 +23,8 @@ services:
       - DB_URL=mongodb+srv://parnetwork03:FDpTIkjSws24neHg@genxi.tiaymzj.mongodb.net/watcher
       - RABBITMQ_URL=amqps://vgvxrvyi:JF_OtuJ7DcmvwSJ2b6bRmKcfxFYMlRA1@puffin.rmq2.cloudamqp.com/vgvxrvyi
       - JWT_SECRET=OKOIjkdmfekr83495rijfdkfls'OFRKEOFKml,drbhfjgeryi
-      - REDIS_URL=redis://redis/
+      - REDIS_URL=redis://redis:6379/
       - REDIS_PASSWORD=efu*&8hsdjer83HUEHWru;isjd
-    depends_on:
-      - redis
+    # depends_on:
+    #   - redis
     restart: always
