@@ -1,5 +1,15 @@
 import { Types } from "mongoose";
 
+export interface IUser {
+  _id: Types.ObjectId;
+  name: string;
+  slackUserId: string;
+  title: string;
+  password: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 export interface IURL {
   _id: Types.ObjectId;
   url: string;

@@ -10,11 +10,11 @@ export const createRedisClient = async () => {
     try {
       const client_1 = createClient({
         url: process.env.REDIS_URL,
-        // password: process.env.REDIS_PASSWORD,
+        password: process.env.REDIS_PASSWORD,
       }) as RedisClientType;
       const client_2 = createClient({
         url: process.env.REDIS_URL,
-        // password: process.env.REDIS_PASSWORD,
+        password: process.env.REDIS_PASSWORD,
       }) as RedisClientType;
 
       // If Pub-sub is used, any place in the code-base, r -> publisher and r_d -> subscriber

@@ -7,6 +7,7 @@ import {
   validate_update_user,
 } from "../validators/user.validators";
 import { valiadte_param_id } from "../validators/custom";
+import { hashPassword } from "../utility/hashPassword";
 
 const userRouter = express.Router();
 
@@ -54,6 +55,10 @@ userRouter.patch(
     const payload = req.body;
     const { id } = req.params;
     try {
+      if (payload.password) {
+        payload.password = hashPassword(payload.password);
+      }
+
       const user = await UserModel.findByIdAndUpdate(id, payload).lean();
       res.status(StatusCodes.OK).json({
         message: "Users updated successfully",

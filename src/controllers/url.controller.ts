@@ -9,6 +9,7 @@ import { IURL } from "../types/model.types";
 import { Request } from "../types/request.types";
 import { Response } from "express";
 import { addJobService } from "../services/jobs.service";
+import { APIError } from "../errors/apiError";
 
 export const createUrlController = async (req: Request, res: Response) => {
   const payload: IURL = req.body;
@@ -34,6 +35,10 @@ export const getUrlController = async (req: Request, res: Response) => {
     query: q,
     populate: ["project"],
   });
+
+  if (!data.length) {
+    throw new APIError(StatusCodes.NOT_FOUND, "URL not found");
+  }
 
   return res
     .status(StatusCodes.OK)

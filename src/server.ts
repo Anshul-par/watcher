@@ -13,6 +13,7 @@ import { errorMiddleware } from "./middlewares/errorMiddleware";
 import { rootRouter } from "./routes";
 import { subscribeToNotifications } from "./utility/listensToRedisEvenst";
 import { TimezoneService } from "./services/timezone.service";
+import { hashPassword } from "./utility/hashPassword";
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
