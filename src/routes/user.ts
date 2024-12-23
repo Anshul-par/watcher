@@ -8,6 +8,8 @@ import {
 } from "../validators/user.validators";
 import { valiadte_param_id } from "../validators/custom";
 import { hashPassword } from "../utility/hashPassword";
+import { validateJWT } from "../middlewares/validateJWT";
+import { validateAdmin } from "../middlewares/validateIsAdmin";
 
 const userRouter = express.Router();
 
@@ -29,6 +31,7 @@ userRouter.get("/", async (_, res) => {
 
 userRouter.post(
   "/",
+  validateJWT,
   validateReqSchema(validate_create_user),
   async (req, res) => {
     const payload = req.body;
@@ -50,6 +53,7 @@ userRouter.post(
 
 userRouter.patch(
   "/:id",
+  validateJWT,
   validateReqSchema(validate_update_user),
   async (req, res) => {
     const payload = req.body;
@@ -66,7 +70,7 @@ userRouter.patch(
         data: user,
       });
     } catch (error) {
-      console.log("Error in userRouter.get(/): ", error);
+      console.log("Error in userRouter.patch(/): ", error);
       res
         .status(StatusCodes.INTERNAL_SERVER_ERROR)
         .json({ message: "Internal Server Error", success: false });
@@ -76,6 +80,8 @@ userRouter.patch(
 
 userRouter.delete(
   "/:id",
+  validateJWT,
+  validateAdmin,
   validateReqSchema(valiadte_param_id),
   async (req, res) => {
     const { id } = req.params;
@@ -87,7 +93,7 @@ userRouter.delete(
         data: users,
       });
     } catch (error) {
-      console.log("Error in userRouter.get(/): ", error);
+      console.log("Error in userRouter.delete(/): ", error);
       res
         .status(StatusCodes.INTERNAL_SERVER_ERROR)
         .json({ message: "Internal Server Error", success: false });

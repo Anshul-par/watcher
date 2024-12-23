@@ -36,10 +36,6 @@ export const getUrlController = async (req: Request, res: Response) => {
     populate: ["project"],
   });
 
-  if (!data.length) {
-    throw new APIError(StatusCodes.NOT_FOUND, "URL not found");
-  }
-
   return res
     .status(StatusCodes.OK)
     .json({ message: "URL fetched successfully", success: true, data });
