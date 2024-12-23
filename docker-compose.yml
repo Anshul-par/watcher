@@ -4,19 +4,19 @@ services:
     image: redis
     container_name: redis
     init: true
-    # volumes:
-    #   - ./r-dump:/r-dump
-    #   - ./redis-backup.sh:/redis-backup.sh
+    volumes:
+      - ./r-dump:/r-dump
+      - ./redis-backup.sh:/redis-backup.sh
     ports:
-      - "6381:6379"
-    # entrypoint: ["/bin/bash", "-c", "/redis-backup.sh"]
+      - "3217:6379"
+    entrypoint: ["/bin/bash", "-c", "/redis-backup.sh"]
 
   watcher:
     build:
       dockerfile: Dockerfile
       context: .
     ports:
-      - "5001:5000"
+      - "3218:5000"
     environment:
       - PORT=5000
       - NODE_ENV=prod
@@ -25,6 +25,6 @@ services:
       - JWT_SECRET=OKOIjkdmfekr83495rijfdkfls'OFRKEOFKml,drbhfjgeryi
       - REDIS_URL=redis://redis:6379/
       - REDIS_PASSWORD=efu*&8hsdjer83HUEHWru;isjd
-    # depends_on:
-    #   - redis
+    depends_on:
+      - redis
     restart: always
