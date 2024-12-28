@@ -7,7 +7,7 @@ export const acquireLock = async ({
   lockKey: string
   timeout?: number
 }) => {
-  const maxAttempts = 3
+  const maxAttempts = 2
   const retryDelayMs = 1200
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
