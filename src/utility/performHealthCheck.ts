@@ -212,8 +212,10 @@ export async function checkSSLCertificate(
 
           handleResolve({
             valid: socket.authorized,
-            aDayBeforeExpiresUnix:
-              expirationDate.getTime() - now - 1000 * 60 * 60 * 24,
+            aDayBeforeExpiresUnix: Math.min(
+              0,
+              expirationDate.getTime() - now - 1000 * 60 * 60 * 24
+            ),
             daysToExpiration,
             issuer: certificate.issuer?.CN || null,
             issuedTo: certificate.subject?.CN || null,
