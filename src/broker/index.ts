@@ -7,10 +7,7 @@ import {
   MOST_ERROR_COUNT,
   MOST_TIMEOUT_COUNT,
 } from "../constants";
-import {
-  checkSSLCertificate,
-  performUrlHealthCheck,
-} from "../utility/performHealthCheck";
+import { performUrlHealthCheck } from "../utility/performHealthCheck";
 import { findUrl } from "../services/url.service";
 import { URLModel } from "../models/url.model";
 import { UserModel } from "../models/user.model";
@@ -19,6 +16,7 @@ import { createHealth } from "../services/health.service";
 import { addJobService } from "../services/jobs.service";
 import { acquireLock } from "../utility/acquireLock";
 import { convertValuesToStrings } from "../utility/convertValuesToString";
+import { safeJsonParse } from "../utility/safeJSONParse";
 
 let connectionToRabbitMQ: amqplib.Connection = null;
 
@@ -30,7 +28,6 @@ let SSLChannel: amqplib.Channel = null;
 let DEAD_LETTER_QUEUE = "dead_url_queue";
 let DELETE_QUEUE = "delete_url_queue";
 let JOB_QUEUE = "job_url_queue";
-let SSL_CHECK_QUEUE = "ssl_url_queue";
 
 const web = new WebClient(process.env.SLACK_TOKEN);
 
@@ -47,7 +44,6 @@ export const connectToRabbitMQ = async () => {
       await createdeadLetterChannel();
       await createJobChannel();
       await createDeleteChannel();
-      await createSSLChannel();
       break;
     } catch (error) {
       console.log(`Error while connecting to RabbitMQ: ${error}`);
@@ -90,19 +86,6 @@ const createJobChannel = async () => {
   }
 };
 
-const createSSLChannel = async () => {
-  try {
-    SSLChannel = await connectionToRabbitMQ.createChannel();
-
-    await SSLChannel.assertQueue(SSL_CHECK_QUEUE, {
-      durable: true,
-    });
-    await consumerForSSLQueue();
-  } catch (error) {
-    console.log(`Error while creating ssl channel to RabbitMQ ${error}`);
-  }
-};
-
 const createDeleteChannel = async () => {
   try {
     deleteChannel = await connectionToRabbitMQ.createChannel();
@@ -137,14 +120,6 @@ export const publishToDeleteQueue = async (data: Buffer) => {
     deleteChannel.sendToQueue(DELETE_QUEUE, data);
   } catch (error) {
     console.log(`Error while publishing to DELETE_QUEUE queue ${error}`);
-  }
-};
-
-export const publishToSSLQueue = async (data: Buffer) => {
-  try {
-    SSLChannel.sendToQueue(SSL_CHECK_QUEUE, data);
-  } catch (error) {
-    console.log(`Error while publishing to SSL_CHECK_QUEUE queue ${error}`);
   }
 };
 
@@ -200,7 +175,6 @@ export const consumerForDeleteQueue = () => {
         const originalKey = parsedData.replace("delete-", "");
         const [_, urlId] = originalKey.replace("cron-", "").split("-");
 
-        // Step 1: Try to acquire the lock
         lockKey = `lock:${urlId}`;
         const lockAcquired = await acquireLock({ lockKey });
 
@@ -214,11 +188,9 @@ export const consumerForDeleteQueue = () => {
 
         console.log(`Successfully acquired lock for URL ID: ${urlId}`);
 
-        // Step 2: Delete shadow key
         const shadowKey = `shadow-${originalKey}`;
         await redisClient.del(shadowKey);
 
-        // Step 3: Fetch and validate data
         const latestData = await redisClient.hGetAll(`${originalKey}`);
 
         if (
@@ -231,17 +203,10 @@ export const consumerForDeleteQueue = () => {
           return;
         }
 
-        // Step 4: Process the latest response data
         const { latestResponse, ...dataTobeSaved } = latestData;
-        let parsedJson;
-        try {
-          parsedJson = JSON.parse(latestResponse);
-        } catch (error) {
-          parsedJson = [];
-        }
+        let parsedJson = safeJsonParse(latestResponse, []);
 
-        // Step 5: Save to database
-        // @ts-ignore
+        //@ts-ignore
         await createHealth({
           ...dataTobeSaved,
           unix: TimezoneService.getCurrentTimestamp(),
@@ -251,7 +216,6 @@ export const consumerForDeleteQueue = () => {
 
         console.log(`Saved data for URL: ${urlId}`);
 
-        // Step 6: Check retry ability
         const numberOfTimeouts = await redisClient.hGet(
           originalKey,
           "numberOfTimeouts"
@@ -266,7 +230,6 @@ export const consumerForDeleteQueue = () => {
           Number(numberOfRetries) >= MOST_ERROR_COUNT
         );
 
-        // Step 7: Delete the original key
         await redisClient.del(`${originalKey}`);
         console.log(`Deleted key: ${originalKey}`);
 
@@ -279,28 +242,26 @@ export const consumerForDeleteQueue = () => {
           return;
         }
 
-        // Step 8: Find URL data and re-add job if retryable
         const url_data = await findUrl({
           query: { _id: urlId },
         });
+
+        console.log(`Found URL data for URL: ${urlId} with data:`, url_data);
 
         if (url_data && url_data.length > 0) {
           // @ts-ignore
           await addJobService({ url_data: url_data[0] });
         }
 
-        // Step 9: Release lock and acknowledge message
         await redisClient.del(lockKey);
         deleteChannel.ack(message);
         console.log(`acknowledged message from delete queue:`, parsedData);
       }
     } catch (error) {
       console.log(`Error while consuming from Delete_Queue  ${error}`);
-      // Release lock if there was an error
       if (lockKey) {
         await redisClient.del(lockKey);
       }
-      // Requeue the message
       deleteChannel.nack(message, false, true);
     }
   });
@@ -336,7 +297,6 @@ export const consumerForJobQueue = () => {
 
           console.log(`Successfully acquired lock for URL ID: ${urlId}`);
 
-          // Step 2: Process the message
           const urlData = await findUrl({ query: { _id: urlId } });
 
           if (urlData.length === 0) {
@@ -346,15 +306,12 @@ export const consumerForJobQueue = () => {
             return;
           }
 
-          // Step 3: Perform health check
           const urlDataToBeProcessed = {
             ...urlData[0],
             method: urlData[0].method || "GET",
           };
 
           const health = await performUrlHealthCheck(urlDataToBeProcessed);
-
-          await publishToSSLQueue(Buffer.from(urlId));
 
           const response = await redisClient.hGetAll(originalKey);
 
@@ -368,16 +325,13 @@ export const consumerForJobQueue = () => {
             return;
           }
 
-          // Record the inspection time.
           const inspection_time = TimezoneService.formatDate(
             TimezoneService.getCurrentTimestamp()
           );
           health["inspection_time"] = inspection_time;
 
-          // Increment the number of cron runs.
           await redisClient.hIncrBy(originalKey, "numberOfCronruns", 1);
 
-          // Update the latest response in Redis.
           await redisClient.hSet(
             originalKey,
             "latestResponse",
@@ -389,7 +343,6 @@ export const consumerForJobQueue = () => {
             ])
           );
 
-          // Update counters for timeouts or retries based on the health check results.
           if (health.isTimeout) {
             await redisClient.hIncrBy(originalKey, "numberOfTimeouts", 1);
           }
@@ -441,7 +394,6 @@ export const consumerForJobQueue = () => {
               initialDelay: Number(cronSchedule),
             });
 
-            // Reschedule the next job with the adjusted delay.
             const shadowKey = `shadow-${originalKey}`;
             await redisClient.set(shadowKey, 1, {
               EX: newCronSchedule,
@@ -461,13 +413,11 @@ export const consumerForJobQueue = () => {
             return;
           }
 
-          // Reschedule the next job with the default cron schedule.
           const shadowKey = `shadow-${originalKey}`;
           await redisClient.set(shadowKey, 1, {
             EX: urlDataToBeProcessed.cronSchedule,
           });
 
-          // Step 6: Release the lock and acknowledge
           await redisClient.del(lockKey);
           jobChannel.ack(message);
 
@@ -481,44 +431,6 @@ export const consumerForJobQueue = () => {
       }
       jobChannel.nack(message, false, true);
       console.error(`Error processing message: ${error}`);
-    }
-  });
-};
-
-export const consumerForSSLQueue = () => {
-  console.log("----Consumer for SSL_Queue started----");
-
-  SSLChannel.prefetch(1);
-  SSLChannel.consume(SSL_CHECK_QUEUE, async (message) => {
-    try {
-      if (message !== null) {
-        const data = message.content;
-        const urlId = data.toString();
-
-        console.log(`Processing message from ssl queue:`, urlId);
-
-        const urlDetails = await findUrl({
-          query: { _id: urlId },
-        });
-
-        if (urlDetails.length) {
-          const ssl_health = await checkSSLCertificate(urlDetails[0].url);
-
-          if (
-            !ssl_health.error &&
-            ssl_health.valid &&
-            ssl_health.aDayBeforeExpiresUnix
-          ) {
-            await redisClient.set(`ssl-${urlId}`, "1", {
-              EX: ssl_health.aDayBeforeExpiresUnix,
-            });
-          }
-        }
-      }
-
-      SSLChannel.ack(message);
-    } catch (error) {
-      console.log(`Error while consuming from SSL_Queue ${error}`);
     }
   });
 };
