@@ -8,7 +8,7 @@ import {
   MOST_TIMEOUT_COUNT,
 } from "../constants";
 import { performUrlHealthCheck } from "../utility/performHealthCheck";
-import { findUrl } from "../services/url.service";
+import { findUrl, updateUrl } from "../services/url.service";
 import { URLModel } from "../models/url.model";
 import { UserModel } from "../models/user.model";
 import { TimezoneService } from "../services/timezone.service";
@@ -23,7 +23,6 @@ let connectionToRabbitMQ: amqplib.Connection = null;
 let deadLetterChannel: amqplib.Channel = null;
 let deleteChannel: amqplib.Channel = null;
 let jobChannel: amqplib.Channel = null;
-let SSLChannel: amqplib.Channel = null;
 
 let DEAD_LETTER_QUEUE = "dead_url_queue";
 let DELETE_QUEUE = "delete_url_queue";
@@ -239,6 +238,10 @@ export const consumerForDeleteQueue = () => {
           );
           deleteChannel.ack(message);
           await redisClient.del(lockKey);
+          await updateUrl({
+            query: { _id: urlId },
+            update: { inProcess: false },
+          });
           return;
         }
 

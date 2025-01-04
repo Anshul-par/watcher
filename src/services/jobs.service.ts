@@ -4,6 +4,7 @@ import { IURL } from "../types/model.types";
 import { convertValuesToStrings } from "../utility/convertValuesToString";
 import { redisClient } from "../utility/startServer";
 import { TimezoneService } from "./timezone.service";
+import { updateUrl } from "./url.service";
 
 export const addJobService = async ({ url_data }: { url_data: IURL }) => {
   if (!url_data.project || !url_data._id) {
@@ -29,30 +30,25 @@ export const addJobService = async ({ url_data }: { url_data: IURL }) => {
     delete url_data.createdAt;
     delete url_data.updatedAt;
 
-    const mainKeyExists = await redisClient.exists(key);
-
-    if (!mainKeyExists) {
-      await redisClient.hSet(
-        key,
-        convertValuesToStrings({ ...url_data, ...otherParams })
-      );
-    }
+    await redisClient.hSet(
+      key,
+      convertValuesToStrings({ ...url_data, ...otherParams })
+    );
 
     const secondsRemainingToday = TimezoneService.getSecondsRemainingToday();
     const expiration = Math.max(1, secondsRemainingToday - 3600);
 
-    const shadowKeyExists = await redisClient.exists(shadowKey);
-    const deleteKeyExists = await redisClient.exists(deleteKey);
+    await redisClient.set(shadowKey, "1", {
+      EX: url_data.cronSchedule,
+    });
 
-    if (!shadowKeyExists) {
-      await redisClient.set(shadowKey, "1", {
-        EX: url_data.cronSchedule,
-      });
-    }
+    await redisClient.set(deleteKey, "1", { EX: expiration });
 
-    if (!deleteKeyExists) {
-      await redisClient.set(deleteKey, "1", { EX: expiration });
-    }
+    // Update the URL in the database to mark it as inProcess
+    await updateUrl({
+      query: { _id: url_data._id },
+      update: { inProcess: true },
+    });
   } catch (error) {
     console.log("Error while adding job", error);
     throw new APIError(StatusCodes.INTERNAL_SERVER_ERROR, error.message);
