@@ -20,6 +20,7 @@ import {
 import { acquireLock } from "../utility/acquireLock"
 import { convertValuesToStrings } from "../utility/convertValuesToString"
 import { safeJsonParse } from "../utility/safeJSONParse"
+import dayjs from "dayjs"
 
 let connectionToRabbitMQ: amqplib.Connection = null
 
@@ -326,9 +327,11 @@ export const consumerForJobQueue = () => {
             return
           }
 
-          const inspection_time = TimezoneService.formatDate(
-            TimezoneService.getCurrentTimestamp()
-          )
+          const inspection_time = dayjs
+            .unix(TimezoneService.getCurrentTimestamp())
+            .tz("Asia/Kolkata")
+            .format("YYYY-MM-DD HH:mm:ss")
+
           health["inspection_time"] = inspection_time
 
           await redisClient.hIncrBy(originalKey, "numberOfCronruns", 1)
