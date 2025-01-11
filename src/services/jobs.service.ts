@@ -20,7 +20,6 @@ export const addJobService = async ({ url_data }: { url_data: IURL }) => {
     const deleteKey = `delete-${key}`;
     const otherParams = {
       numberOfRetries: 0,
-      numberOfTimeouts: 0,
       numberOfCronruns: 0,
       latestResponse: JSON.stringify([]),
       // other params can be added if needed

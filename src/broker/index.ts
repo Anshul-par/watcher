@@ -3,9 +3,9 @@ import { sleep } from "../utility/sleep";
 import { WebClient } from "@slack/web-api";
 import { redisClient } from "../utility/startServer";
 import {
-  decreasingBackoff,
+  analyzeErrorTiming,
+  calculateDynamicBackoff,
   MOST_ERROR_COUNT,
-  MOST_TIMEOUT_COUNT,
 } from "../constants";
 import { performUrlHealthCheck } from "../utility/performHealthCheck";
 import { findUrl, updateUrl } from "../services/url.service";
@@ -13,14 +13,10 @@ import { URLModel } from "../models/url.model";
 import { UserModel } from "../models/user.model";
 import { TimezoneService } from "../services/timezone.service";
 import { createHealth } from "../services/health.service";
-import {
-  addJobService,
-  restartJobAfterDeletion,
-} from "../services/jobs.service";
+import { restartJobAfterDeletion } from "../services/jobs.service";
 import { acquireLock } from "../utility/acquireLock";
 import { convertValuesToStrings } from "../utility/convertValuesToString";
 import { safeJsonParse } from "../utility/safeJSONParse";
-import dayjs from "dayjs";
 
 let connectionToRabbitMQ: amqplib.Connection = null;
 
@@ -145,13 +141,30 @@ export const consumerForDeadLettersQueue = () => {
           path: "project",
         });
 
+        if (!urlDetails) {
+          console.log(`URL not found for ID: ${urlId}`);
+          deadLetterChannel.ack(message);
+          return;
+        }
+
+        let owner = null;
+
+        const fallback_user = await UserModel.findOne({
+          title: "Boss",
+        });
+
         //@ts-ignore
-        const owner = await UserModel.findById(urlDetails.project.owner);
+        if (urlDetails?.project?.owner) {
+          //@ts-ignore
+          owner = await UserModel.findById(urlDetails.project.owner);
+        } else {
+          owner = fallback_user;
+        }
 
         //@ts-ignore
         urlDetails.project.owner = owner;
 
-        await sendMessageToSlack(urlDetails);
+        // await sendMessageToSlack(urlDetails);
 
         deadLetterChannel.ack(message);
 
@@ -159,6 +172,7 @@ export const consumerForDeadLettersQueue = () => {
       }
     } catch (error) {
       console.log(`Error while consuming from Dead_Letter_Queue ${error}`);
+      deadLetterChannel.nack(message, false, true);
     }
   });
 };
@@ -219,19 +233,12 @@ export const consumerForDeleteQueue = () => {
 
         console.log(`Saved data for URL: ${urlId}`);
 
-        const numberOfTimeouts = await redisClient.hGet(
-          originalKey,
-          "numberOfTimeouts"
-        );
         const numberOfRetries = await redisClient.hGet(
           originalKey,
           "numberOfRetries"
         );
 
-        const isRetryAble = !(
-          Number(numberOfTimeouts) >= MOST_TIMEOUT_COUNT ||
-          Number(numberOfRetries) >= MOST_ERROR_COUNT
-        );
+        const isRetryAble = !(Number(numberOfRetries) >= MOST_ERROR_COUNT);
 
         await redisClient.del(`${originalKey}`);
         console.log(`Deleted key: ${originalKey}`);
@@ -332,37 +339,29 @@ export const consumerForJobQueue = () => {
             return;
           }
 
-          const inspection_time = dayjs
-            .unix(TimezoneService.getCurrentTimestamp())
-            .tz("Asia/Kolkata")
-            .format("YYYY-MM-DD HH:mm:ss");
-
-          health["inspection_time"] = inspection_time;
+          health["inspection_time"] = TimezoneService.formatUnixTimestamp(
+            TimezoneService.getCurrentTimestamp()
+          );
 
           await redisClient.hIncrBy(originalKey, "numberOfCronruns", 1);
+
+          const mergedResponse = [
+            ...JSON.parse(response.latestResponse),
+            convertValuesToStrings(health),
+          ];
 
           await redisClient.hSet(
             originalKey,
             "latestResponse",
             JSON.stringify([
-              ...JSON.parse(response.latestResponse).map((r) =>
-                convertValuesToStrings(r)
-              ),
-              convertValuesToStrings(health),
+              ...mergedResponse.map((r) => convertValuesToStrings(r)),
             ])
           );
 
-          if (health.isTimeout) {
-            await redisClient.hIncrBy(originalKey, "numberOfTimeouts", 1);
-          }
-          if (!health.isSuccess && !health.isTimeout) {
+          if (!health.isSuccess) {
             await redisClient.hIncrBy(originalKey, "numberOfRetries", 1);
           }
 
-          const numberOfTimeouts = await redisClient.hGet(
-            originalKey,
-            "numberOfTimeouts"
-          );
           const numberOfRetries = await redisClient.hGet(
             originalKey,
             "numberOfRetries"
@@ -372,35 +371,57 @@ export const consumerForJobQueue = () => {
             "cronSchedule"
           );
 
-          if (
-            Number(numberOfTimeouts) >= MOST_TIMEOUT_COUNT ||
-            Number(numberOfRetries) >= MOST_ERROR_COUNT
-          ) {
-            console.log(
-              `Max retries or timeouts reached for project: ${projectId} and URL ID: ${urlId}`
-            );
+          if (Number(numberOfRetries) >= MOST_ERROR_COUNT) {
+            const shouldPublish = analyzeErrorTiming(mergedResponse);
 
-            await redisClient.del(`shadow-${originalKey}`); // Delete the associated shadow key to stop the cron job
-            console.log(`Deleted shadow key: shadow-${originalKey}`);
-            await redisClient.expire(`delete-${originalKey}`, 1); // Expire the key to remove it from the processing queue and save data to DB
-            console.log(`Expired delete key: delete-${originalKey}`);
+            if (shouldPublish) {
+              console.log(
+                `Max retries or timeouts reached for project: ${projectId} and URL ID: ${urlId}`
+              );
 
-            publishToDeadLetterQueue(Buffer.from(urlId));
-            console.log(`Published to Dead_Letter_Queue`);
+              await redisClient.del(`shadow-${originalKey}`); // Delete the associated shadow key to stop the cron job
+              console.log(`Deleted shadow key: shadow-${originalKey}`);
+              await redisClient.expire(`delete-${originalKey}`, 1); // Expire the key to remove it from the processing queue and save data to DB
+              console.log(`Expired delete key: delete-${originalKey}`);
 
-            jobChannel.ack(message);
-            console.log(`Acknowledged message from Job_Queue`);
-            return;
+              publishToDeadLetterQueue(Buffer.from(urlId));
+              console.log(`Published to Dead_Letter_Queue`);
+
+              jobChannel.ack(message);
+              console.log(`Acknowledged message from Job_Queue`);
+              return;
+            } else {
+              console.log(
+                `Not publishing to Dead_Letter_Queue for project: ${projectId} and URL ID: ${urlId} as Error difference is less than threshold`
+              );
+            }
           }
 
-          if (Number(numberOfTimeouts) > 0 || Number(numberOfRetries) > 0) {
-            const newCronSchedule = decreasingBackoff({
-              retryCount: Number(numberOfRetries) || Number(numberOfTimeouts),
-              maxRetryCount:
-                Number(numberOfTimeouts) > 0
-                  ? MOST_TIMEOUT_COUNT
-                  : MOST_ERROR_COUNT,
+          if (Number(numberOfRetries) > 0) {
+            const errors = mergedResponse
+              .filter(
+                (entry) =>
+                  entry.isSuccess === "false" || entry.isTimeout === "true"
+              )
+              .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+
+            let lastErrorTime = 0;
+            let latestErrorTime = 0;
+
+            if (errors.length > 1) {
+              latestErrorTime = Number(errors[0].timestamp);
+              lastErrorTime = Number(errors[1].timestamp);
+            } else if (errors.length === 1) {
+              latestErrorTime = Number(errors[0].timestamp);
+              lastErrorTime = latestErrorTime;
+            }
+
+            const newCronSchedule = calculateDynamicBackoff({
+              retryCount: Number(numberOfRetries),
+              maxRetryCount: MOST_ERROR_COUNT,
               initialDelay: Number(cronSchedule),
+              lastErrorTime,
+              latestErrorTime,
             });
 
             const shadowKey = `shadow-${originalKey}`;

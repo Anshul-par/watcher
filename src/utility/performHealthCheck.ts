@@ -30,7 +30,6 @@ export interface IUrlHealthCheckResult {
   contentType?: string;
   headers?: Record<string, string>;
   requestMethod: string;
-  isTimeout: boolean; // New flag to indicate if the request timed out
 }
 
 export async function performUrlHealthCheck(
@@ -73,7 +72,6 @@ export async function performUrlHealthCheck(
         ])
       ),
       requestMethod: task.method,
-      isTimeout: false, // Initially set to false, will change if timeout occurs
     };
 
     return result;
@@ -82,23 +80,6 @@ export async function performUrlHealthCheck(
 
     if (error.isAxiosError) {
       const axiosError = error as AxiosError;
-
-      // Handle timeout scenario
-      if (axiosError.code === "ECONNABORTED") {
-        return {
-          taskId: task._id.toString(),
-          url_id: task._id.toString(),
-          url: task.url,
-          timestamp: Date.now(),
-          responseTime,
-          statusCode: 0,
-          isSuccess: false,
-          errorMessage: "Request Timeout",
-          responseSize: 0,
-          requestMethod: task.method,
-          isTimeout: true, // Mark as timeout
-        };
-      }
 
       // Handle other errors
       return {
@@ -112,7 +93,6 @@ export async function performUrlHealthCheck(
         errorMessage: axiosError.message,
         responseSize: 0,
         requestMethod: task.method,
-        isTimeout: false,
       };
     }
 
@@ -128,7 +108,6 @@ export async function performUrlHealthCheck(
       errorMessage: "Unknown error",
       responseSize: 0,
       requestMethod: task.method,
-      isTimeout: false,
     };
   }
 }
