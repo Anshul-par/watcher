@@ -18,6 +18,7 @@ export interface IURL {
   body?: Record<string, any>;
   cronSchedule: number;
   timeout: number;
+  inProcess?: boolean;
   method: "GET" | "POST" | "PATCH" | "DELETE";
   project: Types.ObjectId;
   createdAt?: Date;
