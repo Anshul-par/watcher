@@ -58,8 +58,12 @@ export class TimezoneService {
   static getSecondsRemainingToday(): number {
     try {
       const now = dayjs().tz(this.TIMEZONE);
-      const endOfDay = now.endOf("day");
-      const remaining = endOfDay.diff(now, "second");
+      const endOfDayAt23 = now
+        .set("hour", 23)
+        .set("minute", 0)
+        .set("second", 0)
+        .set("millisecond", 0);
+      const remaining = endOfDayAt23.diff(now, "second");
       return remaining > 0 ? remaining : 0;
     } catch {
       return 0;
