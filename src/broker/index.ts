@@ -141,8 +141,8 @@ export const consumerForDeadLettersQueue = () => {
           path: "project",
         });
 
-        if (!urlDetails) {
-          console.log(`URL not found for ID: ${urlId}`);
+        if (!urlDetails || !urlDetails.project) {
+          console.log(`URL or project not found for ID: ${urlId}`);
           deadLetterChannel.ack(message);
           return;
         }
@@ -154,17 +154,20 @@ export const consumerForDeadLettersQueue = () => {
         });
 
         //@ts-ignore
-        if (urlDetails?.project?.owner) {
+        if (urlDetails.project.owner) {
           //@ts-ignore
           owner = await UserModel.findById(urlDetails.project.owner);
         } else {
           owner = fallback_user;
         }
 
-        //@ts-ignore
-        urlDetails.project.owner = owner;
+        // Make sure project object is not null before setting owner
+        if (urlDetails.project) {
+          //@ts-ignore
+          urlDetails.project.owner = owner;
+        }
 
-        // await sendMessageToSlack(urlDetails);
+        await sendMessageToSlack(urlDetails);
 
         deadLetterChannel.ack(message);
 
