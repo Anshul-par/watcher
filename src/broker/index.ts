@@ -349,10 +349,9 @@ export const consumerForDeleteQueue = () => {
         const parsedData = data.toString();
         console.log(`Processing message from delete queue:`, parsedData);
 
-        const originalKey = parsedData
-          .replace("delete-", "")
-          .replace("cron-", "");
-        const [_, urlId] = originalKey.split("-");
+        const originalKey = parsedData.replace("delete-", "");
+
+        const [_, urlId] = originalKey.replace("cron-", "").split("-");
 
         lockKey = `lock:${urlId}`;
         const lockAcquired = await acquireLock({ lockKey });
@@ -400,20 +399,20 @@ export const consumerForDeleteQueue = () => {
           "numberOfRetries"
         );
 
-        const isRetryAble = !(Number(numberOfRetries) >= MOST_ERROR_COUNT);
+        const isNotRetryAble = Number(numberOfRetries) >= MOST_ERROR_COUNT;
 
         await redisClient.del(`${originalKey}`);
         console.log(`Deleted key: ${originalKey}`);
 
-        if (!isRetryAble) {
+        if (isNotRetryAble) {
           console.log(
             `Max retries or timeouts reached for URL: ${urlId}, not re-adding to the job`
           );
-          deleteChannel.ack(message);
           await updateUrl({
             query: { _id: urlId },
             update: { inProcess: false },
           });
+          deleteChannel.ack(message);
           return;
         }
 
