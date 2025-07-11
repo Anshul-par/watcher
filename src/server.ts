@@ -18,7 +18,7 @@ const port = Number(process.env.PORT) || 3001
 
 // FOR LOGGING REQUESTS TO DEBUG
 app.use((req, _, next) => {
-  const info = req.method + " " + req.url
+  const info = `${req.method} ${req.url}`;
   console.log(
     new Date().toISOString(),
     ":: API HIT ------->",
