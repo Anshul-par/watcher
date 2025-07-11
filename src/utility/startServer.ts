@@ -12,18 +12,21 @@ export let redisClientDuplicate: RedisClientType;
 export const startServer = async (app: Application, port: number) => {
   try {
     await connectToDB();
-    await connectToRabbitMQ();
 
     const { r, r_d } = await createRedisClient();
     redisClient = r;
     redisClientDuplicate = r_d;
 
-    // const urls = await findUrl({ query: { _id: "676276328b680b419820ec0a" } });
+    await connectToRabbitMQ();
 
-    // for (const url of urls) {
-    //   //@ts-ignore
-    //   await addJobService({ url_data: url });
-    // }
+    const urls = await findUrl({ query: {} });
+
+    for await (const url of urls) {
+      await addJobService({
+        // @ts-ignore
+        url_data: url,
+      });
+    }
 
     app.listen(port, () => {
       console.log(`server started at port: ${port}\n`);

@@ -43,6 +43,10 @@ const urlSchema = new Schema(
       ref: "Project",
       required: true,
     },
+    inProcess: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 );

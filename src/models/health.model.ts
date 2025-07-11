@@ -15,12 +15,12 @@ const healthSchema = new Schema(
       type: String,
       default: "0",
     },
-    numberOfTimeouts: {
-      type: String,
-      default: "0",
-    },
     latestResponse: {
       type: Schema.Types.Mixed,
+      required: true,
+    },
+    unix: {
+      type: Number,
       required: true,
     },
   },

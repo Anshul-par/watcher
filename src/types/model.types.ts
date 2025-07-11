@@ -1,5 +1,15 @@
 import { Types } from "mongoose";
 
+export interface IUser {
+  _id: Types.ObjectId;
+  name: string;
+  slackUserId: string;
+  title: string;
+  password: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
 export interface IURL {
   _id: Types.ObjectId;
   url: string;
@@ -8,6 +18,7 @@ export interface IURL {
   body?: Record<string, any>;
   cronSchedule: number;
   timeout: number;
+  inProcess?: boolean;
   method: "GET" | "POST" | "PATCH" | "DELETE";
   project: Types.ObjectId;
   createdAt?: Date;
@@ -27,6 +38,7 @@ export interface IHealth {
   numberOfRetries: number;
   numberOfTimeouts: number;
   latestResponse: any;
+  unix: number;
   createdAt?: Date;
   updatedAt?: Date;
 }

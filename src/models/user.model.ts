@@ -13,6 +13,20 @@ const userSchema = new Schema(
       unique: true,
       trim: true,
     },
+    title: {
+      type: String,
+      default: "",
+    },
+    password: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    role: {
+      type: String,
+      enum: ["ADMIN", "USER"],
+      default: "USER",
+    },
   },
   { timestamps: true }
 );

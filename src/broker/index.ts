@@ -3,14 +3,20 @@ import { sleep } from "../utility/sleep";
 import { WebClient } from "@slack/web-api";
 import { redisClient } from "../utility/startServer";
 import {
-  decreasingBackoff,
+  analyzeErrorTiming,
+  calculateDynamicBackoff,
   MOST_ERROR_COUNT,
-  MOST_TIMEOUT_COUNT,
 } from "../constants";
-import { convertValuesToStrings } from "../utility/convertValuesToString";
 import { performUrlHealthCheck } from "../utility/performHealthCheck";
-import { findUrl } from "../services/url.service";
+import { findUrl, updateUrl } from "../services/url.service";
 import { URLModel } from "../models/url.model";
+import { UserModel } from "../models/user.model";
+import { TimezoneService } from "../services/timezone.service";
+import { createHealth } from "../services/health.service";
+import { restartJobAfterDeletion } from "../services/jobs.service";
+import { acquireLock } from "../utility/acquireLock";
+import { convertValuesToStrings } from "../utility/convertValuesToString";
+import { safeJsonParse } from "../utility/safeJSONParse";
 
 let connectionToRabbitMQ: amqplib.Connection = null;
 
@@ -62,7 +68,7 @@ const createdeadLetterChannel = async () => {
     });
     consumerForDeadLettersQueue();
   } catch (error) {
-    console.log(`Error while creating Location channel to RabbitMQ ${error}`);
+    console.log(`Error while creating dead url channel to RabbitMQ ${error}`);
   }
 };
 
@@ -75,7 +81,7 @@ const createJobChannel = async () => {
     });
     await consumerForJobQueue();
   } catch (error) {
-    console.log(`Error while creating Location channel to RabbitMQ ${error}`);
+    console.log(`Error while creating jobs channel to RabbitMQ ${error}`);
   }
 };
 
@@ -88,7 +94,7 @@ const createDeleteChannel = async () => {
     });
     await consumerForDeleteQueue();
   } catch (error) {
-    console.log(`Error while creating Location channel to RabbitMQ ${error}`);
+    console.log(`Error while creating delete channel to RabbitMQ ${error}`);
   }
 };
 
@@ -96,7 +102,7 @@ export const publishToJobLetterQueue = async (data: Buffer) => {
   try {
     jobChannel.sendToQueue(JOB_QUEUE, data);
   } catch (error) {
-    console.log(`Error while publishing to Location queue ${error}`);
+    console.log(`Error while publishing to JOB_QUEUE queue ${error}`);
   }
 };
 
@@ -104,15 +110,15 @@ export const publishToDeadLetterQueue = async (data: Buffer) => {
   try {
     deadLetterChannel.sendToQueue(DEAD_LETTER_QUEUE, data);
   } catch (error) {
-    console.log(`Error while publishing to Location queue ${error}`);
+    console.log(`Error while publishing to DEAD_LETTER_QUEUE queue ${error}`);
   }
 };
 
 export const publishToDeleteQueue = async (data: Buffer) => {
   try {
-    deleteChannel.sendToQueue(DEAD_LETTER_QUEUE, data);
+    deleteChannel.sendToQueue(DELETE_QUEUE, data);
   } catch (error) {
-    console.log(`Error while publishing to Location queue ${error}`);
+    console.log(`Error while publishing to DELETE_QUEUE queue ${error}`);
   }
 };
 
@@ -123,12 +129,43 @@ export const consumerForDeadLettersQueue = () => {
     try {
       if (message !== null) {
         const data = message.content;
-        const urlId = data.toString();
+        let urlId = data.toString();
+
+        if (urlId.includes("delete-cron-")) {
+          urlId = urlId.replace("delete-cron-", "").split("-")[1]; // Extract URL ID.
+        }
+
+        console.log(`Processing message from dead letter queue:`, urlId);
 
         const urlDetails = await URLModel.findById(urlId).populate({
           path: "project",
-          populate: { path: "owner" },
         });
+
+        if (!urlDetails || !urlDetails.project) {
+          console.log(`URL or project not found for ID: ${urlId}`);
+          deadLetterChannel.ack(message);
+          return;
+        }
+
+        let owner = null;
+
+        const fallback_user = await UserModel.findOne({
+          title: "Boss",
+        });
+
+        //@ts-ignore
+        if (urlDetails.project.owner) {
+          //@ts-ignore
+          owner = await UserModel.findById(urlDetails.project.owner);
+        } else {
+          owner = fallback_user;
+        }
+
+        // Make sure project object is not null before setting owner
+        if (urlDetails.project) {
+          //@ts-ignore
+          urlDetails.project.owner = owner;
+        }
 
         await sendMessageToSlack(urlDetails);
 
@@ -138,6 +175,7 @@ export const consumerForDeadLettersQueue = () => {
       }
     } catch (error) {
       console.log(`Error while consuming from Dead_Letter_Queue ${error}`);
+      deadLetterChannel.nack(message, false, true);
     }
   });
 };
@@ -145,50 +183,66 @@ export const consumerForDeadLettersQueue = () => {
 export const consumerForDeleteQueue = () => {
   console.log("----Consumer for Delete_Queue started----");
 
-  deleteChannel.prefetch(1); // process only one message at a time from the queue
+  deleteChannel.prefetch(1);
   deleteChannel.consume(DELETE_QUEUE, async (message) => {
+    let lockKey = null;
     try {
       if (message !== null) {
         const data = message.content;
         const parsedData = data.toString();
+        console.log(`Processing message from delete queue:`, parsedData);
 
-        const originalKey = parsedData.replace("delete-", ""); // Remove "delete-" prefix to get the original key.
-        const [_, urlId] = originalKey.replace("cron-", "").split("-"); // Extract URL ID.
+        const originalKey = parsedData.replace("delete-", "");
+        const [_, urlId] = originalKey.replace("cron-", "").split("-");
+
+        lockKey = `lock:${urlId}`;
+        const lockAcquired = await acquireLock({ lockKey });
+
+        if (!lockAcquired) {
+          console.log(
+            `Failed to acquire lock for URL ID: ${urlId} after retries. Requeueing message.`
+          );
+          deleteChannel.nack(message, false, true);
+          return;
+        }
+
+        console.log(`Successfully acquired lock for URL ID: ${urlId}`);
 
         const shadowKey = `shadow-${originalKey}`;
-        await redisClient.del(shadowKey); // Delete the associated shadow key.
+        await redisClient.del(shadowKey);
 
-        // Fetch all data associated with the key.
-        const { latestResponse, ...dataTobeSaved } = await redisClient.hGetAll(
-          `${originalKey}`
-        );
+        const latestData = await redisClient.hGetAll(`${originalKey}`);
 
-        // Save the key data to the database.
+        if (
+          !latestData ||
+          !Object.keys(JSON.parse(JSON.stringify(latestData))).length
+        ) {
+          console.log(`key ${originalKey} has been already processed`);
+          deleteChannel.ack(message);
+          await redisClient.del(lockKey);
+          return;
+        }
+
+        const { latestResponse, ...dataTobeSaved } = latestData;
+        let parsedJson = safeJsonParse(latestResponse, []);
+
         //@ts-ignore
         await createHealth({
           ...dataTobeSaved,
-          latestResponse: JSON.parse(latestResponse), // Parse the latest response as JSON.
-          //@ts-ignore
+          unix: TimezoneService.getCurrentTimestamp(),
+          latestResponse: parsedJson,
           url: urlId,
         });
 
         console.log(`Saved data for URL: ${urlId}`);
 
-        const numberOfTimeouts = await redisClient.hGet(
-          originalKey,
-          "numberOfTimeouts"
-        );
         const numberOfRetries = await redisClient.hGet(
           originalKey,
           "numberOfRetries"
         );
 
-        const isRetryAble = !(
-          Number(numberOfTimeouts) >= MOST_TIMEOUT_COUNT ||
-          Number(numberOfRetries) >= MOST_ERROR_COUNT
-        );
+        const isRetryAble = !(Number(numberOfRetries) >= MOST_ERROR_COUNT);
 
-        // Delete the original key from Redis.
         await redisClient.del(`${originalKey}`);
         console.log(`Deleted key: ${originalKey}`);
 
@@ -196,107 +250,121 @@ export const consumerForDeleteQueue = () => {
           console.log(
             `Max retries or timeouts reached for URL: ${urlId} thats why not re-adding to the job`
           );
+          deleteChannel.ack(message);
+          await redisClient.del(lockKey);
+          await updateUrl({
+            query: { _id: urlId },
+            update: { inProcess: false },
+          });
           return;
         }
-        // Find the URL data from the database using the URL ID.
+
         const url_data = await findUrl({
           query: { _id: urlId },
         });
 
-        // Re-add the job for the URL to the processing queue.
-        //@ts-ignore
-        await addJobService({ url_data: url_data[0] });
+        console.log(`Found URL data for URL: ${urlId} with data:`, url_data);
 
+        if (url_data && url_data.length > 0) {
+          // @ts-ignore
+          await restartJobAfterDeletion({ url_data: url_data[0] });
+        }
+
+        await redisClient.del(lockKey);
         deleteChannel.ack(message);
-
-        console.log(`Received message from dead letter queue:`, parsedData);
+        console.log(`acknowledged message from delete queue:`, parsedData);
       }
     } catch (error) {
       console.log(`Error while consuming from Delete_Queue  ${error}`);
+      if (lockKey) {
+        await redisClient.del(lockKey);
+      }
+      deleteChannel.nack(message, false, true);
     }
   });
 };
 
 export const consumerForJobQueue = () => {
   console.log("----Consumer for Job_Queue started----");
-  jobChannel.prefetch(1); // process only one message at a time from the queue
+
+  jobChannel.prefetch(1);
   jobChannel.consume(JOB_QUEUE, async (message) => {
+    let lockKey = null;
     try {
       if (message !== null) {
-        console.log(`Received message from Job_Queue`);
-
         const data = message.content;
         const parsedData = data.toString();
+        const originalKey = parsedData.replace("shadow-", "");
 
-        const originalKey = parsedData.replace("shadow-", ""); // Remove "shadow-" prefix to get the original key.
-
-        // If the original key represents a cron job.
         if (originalKey.includes("cron")) {
           const [projectId, urlId] = originalKey
             .replace("cron-", "")
-            .split("-"); // Extract project ID and URL ID.
+            .split("-");
 
-          // Find the corresponding URL data in the database.
-          const urlData = await findUrl({
-            query: { project: projectId, _id: urlId },
-          });
+          lockKey = `lock:${urlId}`;
+          const lockAcquired = await acquireLock({ lockKey });
 
-          // Handle case where URL data is not found.
-          if (urlData.length === 0) {
-            console.error(
-              `URL not found for project: ${projectId} and URL ID: ${urlId}`
+          if (!lockAcquired) {
+            console.log(
+              `Failed to acquire lock for URL ID: ${urlId} after retries. Requeueing message.`
             );
+            jobChannel.nack(message, false, true);
             return;
           }
 
-          console.log(
-            `Processing job for project: ${projectId} and URL ID: ${urlId}`
-          );
+          console.log(`Successfully acquired lock for URL ID: ${urlId}`);
 
-          // Prepare the URL data for processing, defaulting to "GET" method if not defined.`
+          const urlData = await findUrl({ query: { _id: urlId } });
+
+          if (urlData.length === 0) {
+            console.error(`URL not found for ID: ${urlId}`);
+            jobChannel.ack(message);
+            await redisClient.del(lockKey);
+            return;
+          }
+
           const urlDataToBeProcessed = {
             ...urlData[0],
             method: urlData[0].method || "GET",
           };
 
-          // Perform a health check on the URL.
           const health = await performUrlHealthCheck(urlDataToBeProcessed);
 
-          // Fetch the current state of the original key in Redis.
           const response = await redisClient.hGetAll(originalKey);
 
-          // Record the inspection time.
-          const inspection_time = new Date().toISOString();
-          health["inspection_time"] = inspection_time;
+          if (
+            !response ||
+            !Object.keys(JSON.parse(JSON.stringify(response))).length
+          ) {
+            console.log(`Key ${originalKey} has been already processed`);
+            jobChannel.ack(message);
+            await redisClient.del(lockKey);
+            return;
+          }
 
-          // Increment the number of cron runs.
+          health["inspection_time"] = TimezoneService.formatUnixTimestamp(
+            TimezoneService.getCurrentTimestamp()
+          );
+
           await redisClient.hIncrBy(originalKey, "numberOfCronruns", 1);
 
-          // Update the latest response in Redis.
+          const mergedResponse = [
+            ...JSON.parse(response.latestResponse),
+            convertValuesToStrings(health),
+          ];
+
           await redisClient.hSet(
             originalKey,
             "latestResponse",
             JSON.stringify([
-              ...JSON.parse(response.latestResponse).map((r) =>
-                convertValuesToStrings(r)
-              ),
-              convertValuesToStrings(health),
+              ...mergedResponse.map((r) => convertValuesToStrings(r)),
             ])
           );
 
-          // Update counters for timeouts or retries based on the health check results.
-          if (health.isTimeout) {
-            await redisClient.hIncrBy(originalKey, "numberOfTimeouts", 1);
-          }
-          if (!health.isSuccess && !health.isTimeout) {
+          if (!health.isSuccess) {
             await redisClient.hIncrBy(originalKey, "numberOfRetries", 1);
           }
 
-          // Adjust the cron schedule based on retries and timeouts using backoff logic.
-          const numberOfTimeouts = await redisClient.hGet(
-            originalKey,
-            "numberOfTimeouts"
-          );
           const numberOfRetries = await redisClient.hGet(
             originalKey,
             "numberOfRetries"
@@ -306,38 +374,59 @@ export const consumerForJobQueue = () => {
             "cronSchedule"
           );
 
-          if (
-            Number(numberOfTimeouts) >= MOST_TIMEOUT_COUNT ||
-            Number(numberOfRetries) >= MOST_ERROR_COUNT
-          ) {
-            console.log(
-              `Max retries or timeouts reached for project: ${projectId} and URL ID: ${urlId}`
-            );
+          if (Number(numberOfRetries) >= MOST_ERROR_COUNT) {
+            const shouldPublish = analyzeErrorTiming(mergedResponse);
 
-            await redisClient.del(`shadow-${originalKey}`); // Delete the associated shadow key to stop the cron job
-            console.log(`Deleted shadow key: shadow-${originalKey}`);
-            await redisClient.expire(`delete-${originalKey}`, 5); // Expire the key to remove it from the processing queue and save data to DB
-            console.log(`Expired delete key: delete-${originalKey}`);
+            if (shouldPublish) {
+              console.log(
+                `Max retries or timeouts reached for project: ${projectId} and URL ID: ${urlId}`
+              );
 
-            publishToDeadLetterQueue(Buffer.from(urlId));
-            console.log(`Published to Dead_Letter_Queue`);
+              await redisClient.del(`shadow-${originalKey}`); // Delete the associated shadow key to stop the cron job
+              console.log(`Deleted shadow key: shadow-${originalKey}`);
+              await redisClient.expire(`delete-${originalKey}`, 1); // Expire the key to remove it from the processing queue and save data to DB
+              console.log(`Expired delete key: delete-${originalKey}`);
 
-            jobChannel.ack(message);
-            console.log(`Acknowledged message from Job_Queue`);
-            return;
+              publishToDeadLetterQueue(Buffer.from(urlId));
+              console.log(`Published to Dead_Letter_Queue`);
+
+              jobChannel.ack(message);
+              console.log(`Acknowledged message from Job_Queue`);
+              return;
+            } else {
+              console.log(
+                `Not publishing to Dead_Letter_Queue for project: ${projectId} and URL ID: ${urlId} as Error difference is less than threshold`
+              );
+            }
           }
 
-          if (Number(numberOfTimeouts) > 0 || Number(numberOfRetries) > 0) {
-            const newCronSchedule = decreasingBackoff({
-              retryCount: Number(numberOfRetries) || Number(numberOfTimeouts),
-              maxRetryCount:
-                Number(numberOfTimeouts) > 0
-                  ? MOST_TIMEOUT_COUNT
-                  : MOST_ERROR_COUNT,
+          if (Number(numberOfRetries) > 0) {
+            const errors = mergedResponse
+              .filter(
+                (entry) =>
+                  entry.isSuccess === "false" || entry.isTimeout === "true"
+              )
+              .sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+
+            let lastErrorTime = 0;
+            let latestErrorTime = 0;
+
+            if (errors.length > 1) {
+              latestErrorTime = Number(errors[0].timestamp);
+              lastErrorTime = Number(errors[1].timestamp);
+            } else if (errors.length === 1) {
+              latestErrorTime = Number(errors[0].timestamp);
+              lastErrorTime = latestErrorTime;
+            }
+
+            const newCronSchedule = calculateDynamicBackoff({
+              retryCount: Number(numberOfRetries),
+              maxRetryCount: MOST_ERROR_COUNT,
               initialDelay: Number(cronSchedule),
+              lastErrorTime,
+              latestErrorTime,
             });
 
-            // Reschedule the next job with the adjusted delay.
             const shadowKey = `shadow-${originalKey}`;
             await redisClient.set(shadowKey, 1, {
               EX: newCronSchedule,
@@ -357,37 +446,26 @@ export const consumerForJobQueue = () => {
             return;
           }
 
-          // Reschedule the next job with the default cron schedule.
           const shadowKey = `shadow-${originalKey}`;
           await redisClient.set(shadowKey, 1, {
             EX: urlDataToBeProcessed.cronSchedule,
           });
-        }
 
-        jobChannel.ack(message);
+          await redisClient.del(lockKey);
+          jobChannel.ack(message);
+
+          console.log(`Successfully processed URL ID: ${urlId}`);
+        }
       }
     } catch (error) {
-      console.log(`Error while consuming from Job_Queue ${error}`);
+      console.error(`Error processing message: ${error}`);
+      if (lockKey) {
+        await redisClient.del(lockKey);
+      }
+      jobChannel.nack(message, false, true);
+      console.error(`Error processing message: ${error}`);
     }
   });
-};
-
-export const deleteQueue = async (queueName: string) => {
-  try {
-    await deadLetterChannel.deleteQueue(queueName);
-  } catch (error) {
-    console.log(`Error while deleting queue ${error}`);
-  }
-};
-
-export const closeRabbitMQConnection = async () => {
-  try {
-    await deadLetterChannel.close();
-    await connectionToRabbitMQ.close();
-    console.log("--RabbitMQ Connection Closed--");
-  } catch (error) {
-    console.log(`Error while closing RabbitMQ connection ${error}`);
-  }
 };
 
 export const sendMessageToSlack = async (data: any) => {
@@ -398,6 +476,25 @@ export const sendMessageToSlack = async (data: any) => {
     const result = await web.chat.postMessage({
       channel: channelId,
       text: messageText,
+    });
+
+    if (result.ok) {
+      console.log("Message SENT on Slack");
+    } else {
+      console.log("Message NOT_SENT to Slack");
+    }
+  } catch (error) {
+    console.error("Error while sending message on slack", error);
+  }
+};
+
+export const sendTextMessageToSlack = async (text: any) => {
+  try {
+    const channelId = process.env.SLACK_CHANNEL_ID;
+
+    const result = await web.chat.postMessage({
+      channel: channelId,
+      text: text,
     });
 
     if (result.ok) {

@@ -1,36 +1,34 @@
 version: "3.8"
 services:
-  redis:
+  watcher-redis-server:
     image: redis
-    container_name: redis
+    init: true
+    volumes:
+      - ./r-dump:/r-dump
+      - ./redis-backup.sh:/redis-backup.sh
     ports:
-      - "6379:6379"
-    environment:
-      - REDIS_PASSWORD=88uUHEefh9*&^dghf8ehfue&*Y
-    command: ["redis-server", "--requirepass", "88uUHEefh9*&^dghf8ehfue&*Y"]
-
-  rabbitmq:
-    image: rabbitmq:3.13-management
-    environment:
-      - RABBITMQ_DEFAULT_USER=admin
-      - RABBITMQ_DEFAULT_PASS=Uyh98yuHUy739J&*^e37hu
+      - "3219:6379"
+    entrypoint: ["/bin/bash", "-c", "/redis-backup.sh"]
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      retries: 5
       timeout: 5s
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+      retries: 3
 
   watcher:
     build:
       dockerfile: Dockerfile
       context: .
     ports:
-      - "5000:5000"
+      - "3218:5000"
     environment:
       - PORT=5000
       - NODE_ENV=prod
-      - DB_URL=mongodb+srv://parnetwork03:FDpTIkjSws24neHg@genxi.tiaymzj.mongodb.net/rabbitvpn
-      - BACKEND_URL=http://103.116.176.223:3201
+      - DB_URL=mongodb+srv://parnetwork03:FDpTIkjSws24neHg@genxi.tiaymzj.mongodb.net/watcher
+      - RABBITMQ_URL=amqps://obmslcja:mqaaa6iaKCUm1TW50ug1NCiEJZV_uVFu@puffin.rmq2.cloudamqp.com/obmslcja
+      - JWT_SECRET=OKOIjkdmfekr83495rijfdkfls'OFRKEOFKml,drbhfjgeryi
+      - REDIS_URL=redis://watcher-redis-server
+      - REDIS_PASSWORD=efu*&8hsdjer83HUEHWru;isjd
+    restart: always
+    depends_on:
+      - watcher-redis-server
